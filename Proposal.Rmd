@@ -1,0 +1,100 @@
+---
+title: "Proposal"
+author: "Đề tài: Phân tích và đưa ra các giải pháp để cải thiện các chiến dịch marketing"
+output:
+  html_document:
+  slidy_presentation: 
+    font_adjustment: +5
+  ioslides_presentation: default
+  powerpoint_presentation: default
+---
+```{r setup, include=FALSE}
+library("knitr")
+knit_hooks$set(purl = hook_purl)
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F)
+```
+
+## Phần 1. Giới thiệu
+### Giới thiệu thành viên nhóm
+
+- *Lê Hoàng Khang - 20133050*
+- *Nguyễn Thanh Hùng - 20133045*
+- *Phan Quốc Lưu - 20133065*
+
+### Giới thiệu về tập dữ liệu
+- Dữ liệu này được trích xuất từ website kaggle. 
+- Giả sử bạn là nhân viên viên phân tích marketing và bạn được giám đốc cho biết rằng các chiến dịch marketing gần đây không đạt hiệu quả như mong đợi. Bạn cần phân tích tập dữ liệu này để đề xuất các giải pháp cho công ty theo tập dữ liệu
+- Sử dụng thuật toán Linear regression, ...
+- Link dữ liệu: https://www.kaggle.com/code/jennifercrockett/marketing-analytics-eda-task-final/data
+
+## Phần 2. Dữ liệu
+```{r}
+library(tidyverse)
+library(plyr)
+library(ggplot2)
+library(gridExtra)
+library(cowplot)
+library(dplyr)
+library(Metrics)
+library(caTools)
+library(stargazer)
+library(gghighlight)
+library(ggthemes)
+```
+
+```{r}
+marketing_data <- read.csv("./marketing_data.csv", header = T)
+cat("Tập dữ liệu gồm", nrow(marketing_data),"dòng và",ncol(marketing_data),"cột")
+```
+- ID: Mã khách hàng
+- Year_Birth: Năm sinh của khách hàng
+- Education: Trình độ học vấn của khách hàng
+- Marital_Status: Tình trạng hôn nhân
+- Income: Thu nhập hằng năm
+- Kidhome: Số trẻ em trong gia đình
+- Teenhome: Số thanh thiếu niên trong gia đình
+- Dt_Customer: Ngày đăng ký của khách hàng với công ty
+- Recency: Số ngày kể từ lần mua hàng cuối cùng
+- MntWines: Chi phí cho rượu trong 2 năm qua
+- MntFruits: Chi phí cho hoa quả trong 2 năm qua
+- MntMeatProducts: Chi phí cho thịt trong 2 năm qua
+- MntFishProducts: Chi phí cho cá trong 2 năm qua
+- MntSweetProducts: Chi phí cho đồ ngọt trong 2 năm qua
+- MntGoldProds: Chi phí cho vàng trong 2 năm qua
+- NumDealsPurchases: Số lần mua hàng được giảm giá
+- NumWebPurchases: Số lần mua hàng trên web của cửa hàng
+- NumCatalogPurchases: Số lần mua hàng được thực hiện qua bảng danh mục những mặt hàng
+- NumStorePurchases: Số lần mua hàng tại cửa hàng
+- NumWebVistisMonth: Số lượt truy cập vào trang web của công ty trong tháng trước
+- AcceptedCmp1: Chấp nhận đề nghị chiến dịch thứ 1 (1 nếu khách hàng chấp nhận, 0 là ngược lại)
+- AcceptedCmp2: Chấp nhận đề nghị chiến dịch thứ 2 (1 nếu khách hàng chấp nhận, 0 là ngược lại)
+- AcceptedCmp3: Chấp nhận đề nghị chiến dịch thứ 3 (1 nếu khách hàng chấp nhận, 0 là ngược lại)
+- AcceptedCmp4: Chấp nhận đề nghị chiến dịch thứ 4 (1 nếu khách hàng chấp nhận, 0 là ngược lại)
+- AcceptedCmp5: Chấp nhận đề nghị chiến dịch thứ 5 (1 nếu khách hàng chấp nhận, 0 là ngược lại)
+- Response: Chấp nhận đề nghị chiến dịch cuối cùng (1 nếu khách hàng chấp nhận, 0 là ngược lại)
+- Complain: Lời phần nàn trong 2 năm qua
+- Country: Địa chỉ khách hàng
+
+## Phần 3. Kế hoạch phân tích
+
+- Các biến kết quả (Y) và giải thích (X) mà nhóm sẽ sử dụng để trả lời câu hỏi:
+    -   Biến giải thích (X): Education, Marital_Status, Income, Year_Birth, Num...
+    -   Biến kết quả (Y): AcceptedCmp..., Response, Mnt...
+- **Mục tiêu phân tích**
+    -   **EDA**
+        -   Loại bỏ các giá trị rỗng và giá trị ngoại lệ
+        -   Chuyển đổi các cột dữ liệu về dạng cần thiết
+        -   Tạo một số cột cần thiết cho quá trình phân tích
+    -   **Phân tích thống kê**
+        -   Có mối quan hệ giữa khu vực và sự chấp nhận của 1 chiến dịch (chiến dịch mới nhất) ? (chi-squared)
+        -   Có mối quan hệ giữa những người có con hoặc không có con và sự chấp nhận chiến dịch thành công nhất hay không ? (chi-squared)
+        -   Dự đoán tổng chi tiêu của khách hàng dựa trên thu nhập cá nhân, số lần mua hàng theo các phương thức, ...
+        -   Dự đoán khả năng chấp nhận chiến dịch của khách hàng dựa vào lượt mua hàng, thu nhập, tình trạng hôn nhân, số con trong gia đình, ...
+    -   **Trực quan hóa dữ liệu**
+        -   Tỷ lệ chấp nhận các chiến dịch tiếp thị theo từng khu vục ?
+        -   Phương thức bán hàng nào kém hiệu quả nhất ?
+        -   Chiến dịch thành công nhất và kém nhất ?
+        -   Sản phẩm nào chiếm doanh thu nhiều nhất ?
+    -   **Kết luân**
+        -   Đưa ra các nhận xét, biện pháp để cải thiện chiến dịch
+

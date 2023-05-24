@@ -1,0 +1,473 @@
+---
+title: "Proposal"
+author: "Đề tài: Phân tích và đưa ra các giải pháp để cải thiện các chiến dịch marketing"
+output:
+  html_document:
+  slidy_presentation: 
+    font_adjustment: +5
+  ioslides_presentation: default
+  powerpoint_presentation: default
+---
+```{r setup, include=FALSE}
+library("knitr")
+knit_hooks$set(purl = hook_purl)
+knitr::opts_chunk$set(echo = TRUE, warning = F, message = F)
+```
+
+## Phần 1. Dữ liệu
+```{r}
+library(tidyverse)
+library(plyr)
+library(ggplot2)
+library(gridExtra)
+library(cowplot)
+library(dplyr)
+library(Metrics)
+library(caTools)
+library(stargazer)
+library(gghighlight)
+library(ggthemes)
+```
+
+```{r}
+marketing_data <- read.csv("data/marketing_data.csv", header = T)
+cat("Tập dữ liệu gồm", nrow(marketing_data),"dòng và",ncol(marketing_data),"cột")
+```
+
+## Phần 2. Thực hiện
+### 2.1. EDA
+####    2.1.1. Chuyển đổi dữ liệu
+```{r}
+convertIncome = function(income){
+  income <- gsub('[$., ]', '', income)
+  for(i in 1:length(income)){
+    income[i] <- substring(income[i], 1, nchar(income[i])-2)
+  }
+  income <- as.integer(income)
+  return(income)
+}
+convertToYear = function(date){
+  for(i in 1:length(date)){
+    if(nchar(date[i]) == 8){
+      date[i] <- substring(date[i], 5, nchar(date[i]))
+    }
+    else if(nchar(date[i]) == 9){
+      date[i] <- substring(date[i], 6, nchar(date[i]))
+    }
+    else{
+      date[i] <- substring(date[i], 7, nchar(date[i]))
+    }
+  }
+  date <- as.numeric(date)
+  return(date)
+}
+marketing_data$Income <- convertIncome(marketing_data$Income)
+```
+
+####    2.1.2. Xóa các outlier, giá trị null
+#### Biểu đồ thể hiện và cũng tìm ra các giá trị bất bình thường và ngoại lệ trong tập dữ liệu
+```{r}
+df_num<-select_if(marketing_data,is.numeric)%>%select(-ID)
+df_num_p<-df_num%>%gather(variable,values,1:23)
+df_num_p%>%ggplot()+
+  geom_boxplot(aes(x=variable,y=values), outlier.color="red") + 
+  facet_wrap(~variable,ncol=5,scales="free") + 
+  theme(strip.text.x = element_blank(),
+        text = element_text(size=9)) 
+```
+##### Nhận xét 
+-   Dữ liệu trên cho thấy cột "Income" có số thu nhập đặt biệt rất cao. Điều này có thể do sai sót trong quá trình nhập dữ liệu. Ta sẽ loại bỏ các giá trị đó.
+-   Để phân tích đưa ra cách gần chính xác nhất thì loại bỏ các giá trị ngoại lệ tránh làm ảnh hưởng đến dữ liệu
+
+```{r}
+remove_outliers <- function(x, na.rm = TRUE, ...) {
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = na.rm, ...)
+  H <- 1.5 * IQR(x, na.rm = na.rm)
+  y <- x
+  y[x < (qnt[1] - H)] <- NA
+  y[x > (qnt[2] + H)] <- NA
+  y
+}
+marketing_data$Income <- remove_outliers(marketing_data$Income)
+marketing_data$MntWines <- remove_outliers(marketing_data$MntWines)
+marketing_data$MntFruits <- remove_outliers(marketing_data$MntFruits)
+marketing_data$MntMeatProducts <- remove_outliers(marketing_data$MntMeatProducts)
+marketing_data$MntFishProducts <- remove_outliers(marketing_data$MntFishProducts)
+marketing_data$MntSweetProducts <- remove_outliers(marketing_data$MntSweetProducts)
+marketing_data$MntGoldProds <- remove_outliers(marketing_data$MntGoldProds)
+marketing_data$NumCatalogPurchases <- remove_outliers(marketing_data$NumCatalogPurchases)
+marketing_data$NumWebPurchases <- remove_outliers(marketing_data$NumWebPurchases)
+```
+
+####    2.1.3. Tạo các cột cần thiết
+```{r}
+head(marketing_data)
+```
+```{r}
+count(marketing_data$Marital_Status)
+```
+- Ta có thể kết hợp Alone, Divorced, Single, Widow thành 1 nhóm (Single), Married và Together thành 1 nhóm (Coupled). Absurd và YOLO là các thuộc tính không xác định
+```{r}
+marketing_data$Rel_Status[marketing_data$Marital_Status %in% c('Alone', 'Divorced', 'Single', 'Widow')] <- 'Single'
+marketing_data$Rel_Status[marketing_data$Marital_Status %in% c('Married', 'Together')] <- 'Coupled'
+marketing_data$Rel_Status[marketing_data$Marital_Status %in% c('Absurd', 'YOLO')] <- ''
+```
+- Tạo cột MntSpent từ các cột MntFishProducts, MntMeatProducts, MntFruits, MntSweetProducts, MntWines, MntGoldProds. Cột NumPurchases gồm các cột NumCatalogPurchases, NumStorePurchases, NumWebPurchases. Cột TotalKid gồm Kidhome, Teenhome. Cột TotalAccepted gồm AcceptedCmp1, AcceptedCmp2, AcceptedCmp3, AcceptedCmp4, AcceptedCmp5.
+```{r}
+marketing_data <- marketing_data %>% 
+  mutate(MntSpent = MntFishProducts + MntMeatProducts + MntFruits + MntSweetProducts + MntWines + MntGoldProds) %>%   mutate(NumPurchases = NumCatalogPurchases + NumStorePurchases + NumWebPurchases + NumDealsPurchases) %>% 
+  mutate(TotalKid = Kidhome + Teenhome) %>% 
+  mutate(TotalAccepted = AcceptedCmp1 + AcceptedCmp2 + AcceptedCmp3 + AcceptedCmp4 + AcceptedCmp5) %>%
+  mutate(Child = case_when (TotalKid == 0 ~ 0, TotalKid != 0 ~ 1))
+```
+
+-   Loại bỏ các cột không cần thiết và giá trị null
+```{r}
+uncolumn <- c('ID', 'Kidhome', 'Marital_Status', 'Teenhome', 'Year_Birth')
+marketing_data <- marketing_data %>% 
+  select(-one_of(uncolumn)) %>% 
+  mutate_all(na_if, '') %>% 
+  na.omit()
+```
+
+### 2.2. Phân tích thống kê
+#### Mối quan hệ giữa khách hàng trong từng khu vực và sự chấp nhận của 1 chiến dịch (chiến dịch mới nhất)?
+    +   Giả thuyết nhóm đưa ra:
+      ++    Ho: Không có mối quan hệ giữa khách hàng trong từng khu vực với sự chập nhận của 1 chiến dịch
+      ++    Ha: Có mối quan hệ giữa khách hàng trong từng khu vực với sự chập nhận của 1 chiến dịch
+    +   Đếm số lượt chấp nhận hoặc không chấp nhận theo quốc gia
+```{r}
+accptByCountry <- marketing_data %>% group_by(marketing_data$Country, marketing_data$Response) %>% 
+  dplyr::summarize(total_count=n(), .groups = 'drop') %>% as.data.frame()
+accptByCountry
+```
+    +   Tạo ma trận với số dòng là số các quốc gia, và cột gồm 2 cột (cột đầu tiên là số người chấp nhận chiến dịch, cột thứ hai là số người không chấp nhận chiến dịch)
+    +   Dùng kiểm định chi-squared test để kiểm tra giả thuyết trên 
+```{r}
+dt_accptByCountry <- matrix(c(21, 125, 38, 226, 17, 99, 12, 134, 2, 1, 52, 283, 176, 917, 13, 94), nrow = 8, byrow = T)
+dt_accptByCountry
+chisq.test(dt_accptByCountry)
+```
+##### Nhận xét
+-  Với p-value = 0.06108 không nhỏ hơn 0.05 nên ta không thể bác bỏ giả thuyết Ho (bác bỏ Ha). Ta không thể kết luận có mối quan hệ giữa khách hàng ở từng khu vực với với chấp nhận chiến dịch (2 biến hoàn toàn độc lập)
+
+#### Mối quan hệ giữa những người có con hoặc không có con và sự chấp nhận chiến dịch (thành công nhất) ?
+    +   Giả thuyết nhóm đưa ra:
+      ++    Ho: Không có mối quan hệ giữa những người có con hoặc không có con và sự chấp nhận chiến dịch
+      ++    Ha: Có mối quan hệ giữa những người có con hoặc không có con và sự chấp nhận chiến dịch
+    +   Đếm số lượt chấp nhận hoặc không chấp nhận theo những người có con hoặc không có con
+```{r}
+accptByChild <- marketing_data %>% group_by(marketing_data$Child, marketing_data$AcceptedCmp4) %>% 
+  dplyr::summarize(total_count=n(), .groups = 'drop') %>% as.data.frame()
+accptByChild
+```
+    +   Tạo ma trận với số dòng là số người có con hoặc không con, và cột gồm 2 cột (cột đầu tiên là số người chấp nhận chiến dịch, cột thứ hai là số người không chấp nhận chiến dịch)
+    +   Dùng kiểm định chi-squared test để kiểm tra giả thuyết trên 
+```{r}
+dt_accptByChild <- matrix(c(97, 1482, 67, 564), nrow = 2, byrow = T)
+dt_accptByChild
+chisq.test(dt_accptByChild)
+```
+##### Nhận xét
+-   Với p-value = 0.0004075 nhỏ hơn 0.0001 nên ta bác bỏ giả thuyết Ho (chấp nhận Ha). Ta có thể kết luận có mối quan hệ giữa những người có con hoặc không có con và sự chấp nhận chiến dịch (2 biến này có ảnh hưởng đến nhau)
+
+### Dự đoán tổng chi tiêu của khách hàng dựa trên thu nhập cá nhân, số lần mua hàng theo các phương thức,...
+```{r}
+colSums(is.na(marketing_data))
+```
+
+```{r}
+data_1<- na.omit(marketing_data)
+str(data_1)
+```
+-   Chia mô hình thành 2 tập (70% train, 30% test)
+```{r}
+set.seed(123)
+sample <- sample.split(marketing_data , SplitRatio = 0.7)
+X_train <- subset(marketing_data, sample == TRUE)
+X_test <- subset(marketing_data, sample == FALSE)
+```
+-    Huấn luyện mô hình
+```{r}
+model <- lm(X_train$MntSpent ~ .- Dt_Customer - MntGoldProds - MntSweetProducts - MntFishProducts - MntMeatProducts - MntWines - MntFruits, data = X_train)
+
+summary(model)
+```
+-   Các biến ảnh hưởng đến mô hình
+```{r}
+pvaluedf <- data.frame(summary(model)$coefficients[,c('Pr(>|t|)', 'Estimate')])
+colnames(pvaluedf) <- c('pvalue', 'coefficient')
+pvaluedf$variables <- rownames(pvaluedf)
+
+#Plot the variables and their significance 
+pvaluedf %>% 
+  ggplot(aes(x = reorder(variables, pvalue),y = pvalue)) +
+    geom_col() +
+    geom_hline(yintercept = 0.05, color = "white") + ## level of Significance
+    geom_text(aes(x = 2, y = 0.10),label = "5%", color = "darkred") +
+    scale_x_discrete(name = "Predictors") +
+    ggtitle("X-Variables and their P-Values") +
+    coord_flip() +
+    theme_minimal()
+```
+
+-   Huấn luyện mô hình sau khi tìm được các giá trị có ảnh hưởng
+```{r}
+re_select <-select( X_train ,c('Income', 'MntSpent', 'NumWebVisitsMonth', 'NumCatalogPurchases', 'NumWebPurchases', 'NumStorePurchases'))
+model1 <- lm(X_train$MntSpent ~., data = re_select)
+
+summary(model1)
+```
+-   Biểu đồ thể hiện sư phân tán của sai số
+```{r}
+ggplot(data=model1, aes(model1$residuals)) +
+geom_histogram(binwidth = 1, color = "black", fill = "purple4") +
+theme(panel.background = element_rect(fill = "white"),
+axis.line.x=element_line(),
+axis.line.y=element_line()) +
+ggtitle("Histogram for Model Residuals")
+```
+-   Biểu đồ residuals phân bố đều theo trục 0
+
+-   Mô hình hồi qui tuyến tính có phương trình 
+```{r}
+stargazer(model1, type = "text")
+```
+-   Phương trình MntSpent = 0.006*Income + 20.338*NumWebVisitsMonth + 90.063*NumCatalogPurchases + 20.493*NumWebPurchases + 37.007*NumStorePurchases
+
+-   Trực quan hóa các biến ảnh hưởng đến mô hình
+```{r}
+subset(re_select, (MntSpent < 99999999))  %>%
+  ggplot(aes(Income  ,MntSpent)) +
+  geom_point(alpha=0.5, size=2 , aes(color=MntSpent)) +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(y="MntSpent", x="Income", subtitle="Icome vs MntSpent")
+
+subset(re_select, (MntSpent < 99999999))  %>%
+  ggplot(aes(NumStorePurchases  ,MntSpent)) +
+  geom_point(alpha=0.5, size=2 , aes(color=MntSpent)) +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(y="MntSpent", x="NumStorePurchases", subtitle="NumStorePurchases vs MntSpent")
+
+subset(re_select, (MntSpent < 99999999))  %>%
+  ggplot(aes(NumWebPurchases  ,MntSpent)) +
+  geom_point(alpha=0.5, size=2 , aes(color=MntSpent)) +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(y="MntSpent", x="NumWebPurchases", subtitle="NumWebPurchases vs MntSpent")
+```
+-   So sáng giá trị thực tế và giá trị dự đoán
+```{r}
+X_test$Dt_Customer <- NULL
+
+pres<-predict(model1,X_test)
+plot.default(X_test$MntSpent,type = "l",lty = 1,col="red")
+lines(pres,type = "l",col = "blue")
+plot.default(pres,type = "l",col="red")
+```
+##### Nhận xét
+-   Biểu đồ đường ở trên,thể hiện 2 tập dữ liệu thực tế, và dự đoán, nhìn vào biểu đồ có thể thấy dữ liệu dự đoán cũng khá khớp với thực tế. Cho thấy mô hình dự đoán tốt ở bộ dữ liệu test.
+
+-   **Đánh giá mô hình**
+  +   Ta thường dùng root-mean-square error, 𝑅𝑀𝑆𝐸 = √𝑀𝑆𝐸, vì nó có cùng đơn vị với yi(thực tế)
+  +   Lỗi dự đoán RMSE (Lỗi bình phương trung bình gốc), biểu thị chênh lệch trung bình giữa các giá trị kết quả đã biết được quan sát trong dữ liệu thử nghiệm và các giá trị kết quả dự đoán của mô hình. RMSE càng thấp, mô hình càng tốt.
+```{r}
+mse<-mean((pres-X_test$MntSpent)^2)
+rmse<-sqrt(mse)
+sprintf("RMSE: %f", rmse)
+sprintf("Chuẩn hóa RMSE: %f", rmse/(max(X_test$MntSpent) - min(X_test$MntSpent)))
+sprintf("Chuẩn hóa RMSE: %f", rmse/mean(X_test$MntSpent))
+sprintf("R^2 trên tập dự đoán với tập test: %f", cor(X_test$MntSpent,pres))
+sprintf("Tập dữ liệu phân bố từ [%d, %d]", min(X_test$MntSpent), max(X_test$MntSpent))
+```
+- Mô hình dự đoán trên tập test giải thích được 91% sự thay đổi của các biến phụ thuộc. Mức giải thích này được cho là khá tốt
+
+
+
+### Dự đoán khả năng chấp nhận chiến dịch của khách hàng dựa vào lượt mua hàng, thu nhập, tình trạng hôn nhân, số con trong gia đình, ...
+- loại bỏ các giá trị NA
+```{r}
+data_1<- na.omit(marketing_data)
+str(data_1)
+```
+
+**Bước 1 Sử dụng hồi quy logistic**
+- Tham số đầu vào: Các thuộc tính của dữ liệu
+
+- Tham số dự đoán: Phản hồi (khả năng chấp nhận chiến dịch)
+
+- Phương pháp: glm cho mô hình logistic
+
+- Phương pháp đánh giá: ma trận nhầm lẫn
+
+-   Chia mô hình thành 2 tập (70% train, 30% test)
+```{r}
+library(caTools)
+set.seed(123)
+sample <- sample.split(marketing_data$Response , SplitRatio = 0.7)
+
+# chia mẫu thành X_train,X_test
+
+X_train <- subset(marketing_data, sample == TRUE)# mẫu xây dựng 
+X_test <- subset(marketing_data, sample == FALSE)# mẫu kiểm định
+
+X_train$Response <- as.integer(X_train$Response)
+X_test$Response <- as.integer(X_test$Response)
+
+```
+- Xây dựng hồi quy logistic
+```{r}
+
+model4 <- glm(formula = Response ~ Income+Education+Recency+MntWines+MntFruits+MntMeatProducts+MntFishProducts+MntSweetProducts+MntGoldProds+NumDealsPurchases+NumWebPurchases+NumCatalogPurchases+NumStorePurchases+NumWebVisitsMonth ,family = "binomial" ,data = X_train)
+summary(model4)
+#glmImp <- varImp(model4)
+#family = "binomial" biến nhị phân cũng là biến kết quả 
+
+```
+- Theo quan sát mô hình, các biến ảnh hưởng đến chiến dịch là: NumWebVisitsMonth NumStorePurchases,MntMeatProducts, MntGoldProds, MntWines,Recency
+
+**Đưa ra dự đoán với 'Response' là xác suất**
+
+```{r}
+# đưa ra dự đoán với response là xác xuất 
+probabilities = predict(model4,X_test, type = "response")
+# với xác xuất nằm trong khoảng thì đánh giá mô hình với độ chính xác mô hình 
+predicted.classes <- ifelse(probabilities > 0.5, 1, 0)
+mean(predicted.classes == X_test$Response)
+```
+- Với dự đoán xác xuất là 89% độ chính xác mô hình khá cao 
+**Bước 2 xây dựng ma trận nhần lẫn**
+- xây dựng một ma trận để so sánh các giá trị thực tế và dự đoán
+```{r} 
+table(X_test$Response, predicted.classes > 0.5 )
+```
+- Tính độ nhạy 
+```{r}
+20/(79+20)
+```
+- Độ nhạy : Trong chiến dịch thực tế thành công có 20% được dự báo thành công 
+
+- Tính độ đặc hiệu 
+```{r}
+545/(79+545)
+```
+- Độ độ đặc hiệu : Trong chiến dịch thực tế không thành công có 87% được dự báo không thành công
+                                                                                                                                  
+
+-Độ chính xác cao 87% tuy nhiên dộ nhạy khá thấp với 20%: Không dự báo được chiến dịch thực tế thành công 
+
+
+- Xây dựng phương trình dự báo
+```{r}
+
+library(ROCR)
+# phương trình dự báo 
+ptdubao = prediction(probabilities ,X_test$Response)
+# xây dựng hàm thực hiện với độ nhạy và độ đặc hiệu
+hinhptdubao  = performance(ptdubao , "tpr", "fpr")
+plot(hinhptdubao)
+#plot(hinhptdubao , colorize = TRUE, print.cotoffs.at  = seq (0,1, by=0.1 ),test.adj= c(-0.2,1.7))
+
+
+```
+
+- Đường cong biểu diễn mức ngưỡng t phụ thuộc vào sai số trong mô hình
+- Khi độ nhạy tăng thì sai số dương giả tăng và ngược lại
+
+-Chỉ số đường AUROC
+
+
+```{r}
+as.numeric(performance(ptdubao, "auc")@y.values)
+```
+- Chỉ báo đường cong AUC thể hiện khả năng dự đoán của mô hình với tỷ lệ thành công là 83.74%, cho thấy mô hình dự đoán khá tốt cả về âm tính thực và dương tính thực.
+
+### 2.3. Trực quan hóa dữ liệu
+##### Tỷ lệ chấp nhận các chiến dịch tiếp thị theo từng khu vục ?
+```{r}
+df_campaigns<-marketing_data%>%
+  select(Country,AcceptedCmp1,AcceptedCmp2,AcceptedCmp3,AcceptedCmp4,AcceptedCmp5)%>%
+  group_by(Country)%>%
+  summarise_all(funs(mean))%>%
+  gather(.,Campaign,Acceptance_rate,"AcceptedCmp1":"AcceptedCmp5")
+
+ggplot(data =df_campaigns ,aes(x=Country,y=Acceptance_rate,fill=Campaign))+
+  geom_col(position="stack",width=0.5)+
+  scale_fill_brewer(palette = "RdGy")+
+  scale_y_continuous(labels=scales::percent)+
+  ggtitle("Acceptance rate of Campaigns across Countries") 
+```
+##### Nhận xét 
+- Từ biểu đồ trên,ta có thể thấy rằng tỷ lệ chấp nhận của các chiến dịch 1,3,4,5 trên khắp tất cả các quốc gia gần gần giống nhau (ngoại trừ quốc gia ME) 
+- Có 3 vùng "AUS", "ME", "US" chưa chấp nhận chiến dich số 2 ta nên đề xuất chiến dịch tương ứng để tăng tỉ lệ chấp nhận trên các quốc gia 
+##### Phương thức bán hàng nào kém hiệu quả nhất ?
+```{r}
+s <- c(sum(marketing_data$NumDealsPurchases), sum(marketing_data$NumCatalogPurchases), sum(marketing_data$NumStorePurchases), sum(marketing_data$NumWebPurchases))
+s <- round((s/sum(marketing_data$NumPurchases))*100)
+label <- c("Deal", "Catalog", "Store", "Web")
+data <- data.frame(label, s)
+ggplot(data, aes(x="", y=s, fill=label)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  geom_text(aes(label = paste0(s, "%")), position = position_stack(vjust=0.5)) +
+  labs(x = NULL, y = NULL, fill = NULL) +
+  theme_classic() +
+  theme(axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()) +
+  scale_fill_manual(values=c("#6BAE6A", "#FDE82E", "#4B0B5B", "#34667E"))
+```
+##### Nhận xét
+- Từ biểu đồ trên,ta có thể thấy rằng số lần mua hàng trực tiếp tại cửa hàng và mua trực tuyến chiếm tỷ lệ cao. Trong đó mua hàng tại cửa hàng được ưa chuộng
+- Số lần mua hàng theo danh mục và số lần mua hàng được giảm giá còn khá thấp. Do đó cần phải đưa ra các chiến lược quảng cáo trên truyền thông để thu hút sự chú ý của nhiều khách hàng hơn
+##### Sản phẩm nào chiếm doanh thu nhiều nhất ?
+```{r}
+products <- c("Wines", "Fruits", "Meat", "Fish", "Sweets", "Gold")
+spent <- c(sum(marketing_data$MntWines), sum(marketing_data$MntFruits), sum(marketing_data$MntMeatProducts), sum(marketing_data$MntFishProducts), sum(marketing_data$MntSweetProducts), sum(marketing_data$MntGoldProds))
+
+df <- data.frame(products, spent)
+ggplot(df, aes(x="", y=spent, fill=products)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  geom_text(aes(label = paste0(spent, "$")), position = position_stack(vjust=0.5)) +
+  labs(x = NULL, y = NULL, fill = NULL) +
+  theme_classic() +
+  theme(axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank()) +
+  scale_fill_manual(values=c("#7CB5EC", "#434348", "#90ED7D", "#F7A35C", "#8085E9", "#F15C80"))
+```
+##### Nhận xét
+- Có thể thấy được rượu là mặt hàng bán khá chạy. Trái cây và đồ ngọt được ít người tiêu dùng chú ý nhiều
+##### Chiến dịch thành công nhất và kém nhất ?
+```{r}
+df_cam<-marketing_data%>%
+    group_by(Rel_Status) %>% 
+    pivot_longer(contains("cmp")) %>% 
+    mutate(name=case_when(
+      name == "accepted_cmp1" ~ "Cmp_1",
+      name == "accepted_cmp2" ~ "Cmp_2",
+      name == "accepted_cmp4" ~ "Cmp_4",
+      name == "accepted_cmp5" ~ "Cmp_5",
+      name == "accepted_cmp3"~ "Cmp_3",
+      TRUE ~ name))->cmp_pivot
+aggregate(value ~Rel_Status+name,cmp_pivot,sum)->agg_cmp  
+
+agg_cmp %>% 
+  group_by(name) %>% 
+  ggplot(aes(name,value))+geom_col(fill="blue")+
+  gghighlight::gghighlight(name=="Cmp_4")+
+labs(title = "Each Of The Campaigns Did Well Apart From Campaign 2",
+     subtitle = "Campaign 3, 4 did better than any other camapaign",
+     y="COunt of Campaign",x="Campaign")+
+  ggthemes::theme_igray()
+```
+##### Nhận xét
+ - Chiến dịch 3, 4 tốt hơn các chiến dịch còn lại
+ - Chiến dịch 2 là chiến dịch tế nhất
+ 
+### 2.4. Nhận xét và đề xuất các biện pháp
+ - Các sản phẩm thành công nhất là rượu vang và thịt (tức là khách hàng trung bình đã chi tiêu nhiều nhất cho các mặt hàng này) .Đề xuất: tập trung các chiến dịch quảng cáo để tăng doanh số của các mặt hàng ít phổ biến hơn). 
+ - Chiến dịch 2 là chiến dịch kém hiệu quả ở mọi khu vực được áp dụng. Có thể loại bỏ chiến dịch 2 hoặc áp dụng các mô hình của chiến dịch 3,4 sang chiến dịch 2
+ - Phương thức bán hàng hàng đầu là trực tiếp tại cửa hàng, theo sau là bán hàng qua trang web.
+ - Khuyến khích tập trung quảng cáo các chiến dịch trong các phương thức bán hàng thành công hơn để tiếp cận nhiều khách hàng hơn và cũng để tăng doanh số của các sản phẩm hoạt động kém.
+ - Khách hàng thường xuyên là những người mua sản phẩm thông qua cả ba phương thức. Như đã nêu trước đây, mua hàng Web & Catalog có tác động tích cực đến việc mua ở cửa hàng. Đề xuất ra một hệ thống phần thưởng duy nhất cho phương thức cửa hàng sẽ tăng cường sự tham gia của người tiêu dùng và dự kiến và sẽ tăng số lượng giao dịch mua ở cửa hàng
